@@ -12,5 +12,7 @@
         <Button Click="OnStopClicked">Stop</Button>
         <Button Click="OnPreviousClicked">Previous</Button>
         <Button Click="OnNextClicked">Next</Button>
+        <Slider Minimum="0" Maximum="100" Value="75" Orientation="Horizontal" VerticalAlignment="Center" Width="100"
+                ValueChanged="RangeBase_OnValueChanged"/>
     </StackPanel>
 </Window>

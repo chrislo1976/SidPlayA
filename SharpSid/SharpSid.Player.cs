@@ -1,44 +1,46 @@
-using NAudio.Wave;
 using System;
-using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Threading;
+using SoundFlow.Backends.MiniAudio;
+using SoundFlow.Components;
+using SoundFlow.Enums;
+using SoundFlow.Providers;
 
+namespace SharpSid;
 
-
-namespace SharpSid
+public class Player : IDisposable
 {
-  public class Player : IDisposable
-  {
-    private const int                 MULTIPLIER_SHIFT = 4;
-    private const int                 MULTIPLIER_VALUE = 1 << MULTIPLIER_SHIFT;
+    private const int MULTIPLIER_SHIFT = 4;
+    private const int MULTIPLIER_VALUE = 1 << MULTIPLIER_SHIFT;
 
-    private const int                 _Frequency = 44100;
-    private const int                 _ByteBufferSize = 2 * _Frequency;
-    private const int                 _ShortBufferSize = _ByteBufferSize / 2;
+    private const int FREQUENCY = 44100;
+    private const int BYTE_BUFFER_SIZE = 2 * FREQUENCY;
+    private const int SHORT_BUFFER_SIZE = BYTE_BUFFER_SIZE / 2;
 
-    private bool                      _IsStereo = false;
+    private const int PLAY_BUFFER_SIZE = 16384;
 
-    private volatile Thread           _Thread = null;
-    private volatile bool             _Aborting = false;
+    
+    private bool _isStereo;
 
-    private int                       _PlayBufferSize = 16384;
-    private IntPtr                    _PlayBuffer = IntPtr.Zero;
+    private volatile Thread _thread;
+    private volatile bool _aborting;
 
-    private IWavePlayer               _WavePlayer;
-    private BufferedWaveProvider      _BufferedWaveProvider;
+    private readonly CircularBufferStream _stream = new(PLAY_BUFFER_SIZE * 4);
 
-    private short[]                   _ShortBuffer;
-    private byte[]                    _ByteBuffer;
+    // ReSharper disable once NotAccessedField.Local
+    private MiniAudioEngine _audioEngine;
+    
+    private SoundPlayer _soundPlayer;
 
-    private bool                      _Aborted = true;
+    private short[] _shortBuffer;
+    private byte[] _byteBuffer;
 
-    private object                    _LockObj = new object();
+    private readonly bool _aborted = true;
 
-    private InternalPlayer            _InternalPlayer;
+    private readonly Lock _lockObj = new();
 
-    private SidTune                   _CurrentTune = null;
+    private InternalPlayer _internalPlayer;
+    private SidTune _currentTune;
 
 
 
@@ -47,200 +49,175 @@ namespace SharpSid
     /// </summary>
     public Player()
     {
-      init();
+        Init();
     }
 
-
-
-    private void init()
+    private void Init()
     {
-      _ShortBuffer = new short[_ShortBufferSize];
-      _ByteBuffer = new byte[_ByteBufferSize];
+        _shortBuffer = new short[SHORT_BUFFER_SIZE];
+        _byteBuffer = new byte[BYTE_BUFFER_SIZE];
+      
+        _audioEngine = new MiniAudioEngine(FREQUENCY, Capability.Playback);
+        _soundPlayer = new SoundPlayer(new RawDataProvider(_stream, SampleFormat.S16, 2, FREQUENCY));
 
-      _PlayBuffer = Marshal.AllocHGlobal( _PlayBufferSize );
+        Mixer.Master.AddComponent(_soundPlayer);
     }
-
-
-
+    
     private void Filler()
     {
-      int playedSize = (int)_InternalPlayer.play( _ShortBuffer, _PlayBufferSize );
+        var playedSize = (int)_internalPlayer.play(_shortBuffer, PLAY_BUFFER_SIZE);
 
-      int pos = playedSize;
-      int idx = 2 * playedSize;
+        var pos = playedSize;
+        var idx = 2 * playedSize;
 
-      if ( _IsStereo )
-      {
-        while ( pos > 0 )
+        if (_isStereo)
         {
+            while (pos > 0)
+            {
+                int sl  = (short)((short)(_shortBuffer[--pos] << 8 ) | _shortBuffer[--pos]);
+                int sr  = (short)((short)(_shortBuffer[--pos] << 8 ) | _shortBuffer[--pos]);
+                sl = sl * MULTIPLIER_VALUE >> MULTIPLIER_SHIFT;
+                sr = sr * MULTIPLIER_VALUE >> MULTIPLIER_SHIFT;
 
-          int sl  = (short)( (short)(_ShortBuffer[--pos] << 8 ) | ( _ShortBuffer[--pos] ) );
-          int sr  = (short)( (short)(_ShortBuffer[--pos] << 8 ) | ( _ShortBuffer[--pos] ) );
-          sl      = (int)( sl * MULTIPLIER_VALUE ) >> MULTIPLIER_SHIFT;
-          sr      = (int)( sr * MULTIPLIER_VALUE ) >> MULTIPLIER_SHIFT;
-
-          _ByteBuffer[--idx] = (byte)( sl >> 8 );
-          _ByteBuffer[--idx] = (byte)( sl & 0xff );
-          _ByteBuffer[--idx] = (byte)( sr >> 8 );
-          _ByteBuffer[--idx] = (byte)( sr & 0xff );
+                _byteBuffer[--idx] = (byte)(sl >> 8);
+                _byteBuffer[--idx] = (byte)(sl &  0xff);
+                _byteBuffer[--idx] = (byte)(sr >> 8);
+                _byteBuffer[--idx] = (byte)(sr &  0xff);
+            }
         }
-      }
-      else
-      {
-        while ( pos > 0 )
+        else
         {
-          int s   = (short)( (short)( _ShortBuffer[--pos] << 8 ) | ( _ShortBuffer[--pos] ) );
-          s       = (int)( s * MULTIPLIER_VALUE ) >> MULTIPLIER_SHIFT;
-          byte sl = (byte)(s >> 8);
-          byte sr = (byte)(s & 0xFF);
+            while (pos > 0)
+            {
+                int s  = (short)((short)(_shortBuffer[--pos] << 8) | _shortBuffer[--pos]);
+                s      = s * MULTIPLIER_VALUE >> MULTIPLIER_SHIFT;
+                var sl = (byte)(s >> 8);
+                var sr = (byte)(s & 0xFF);
 
-          _ByteBuffer[--idx] = sl;
-          _ByteBuffer[--idx] = sr;
-          _ByteBuffer[--idx] = sl;
-          _ByteBuffer[--idx] = sr;
+                _byteBuffer[--idx] = sl;
+                _byteBuffer[--idx] = sr;
+                _byteBuffer[--idx] = sl;
+                _byteBuffer[--idx] = sr;
+            }
         }
-      }
 
-      _BufferedWaveProvider.AddSamples( _ByteBuffer, 0, playedSize * 2 );
+        _stream.Write(_byteBuffer, 0, playedSize * 2);
     }
-
-
-
-    public bool LoadSIDInfoFromFile( string Filename, out SidTuneInfo Info )
+    
+    public bool LoadSidFromFile(string filename)
     {
-      Info = null;
-      try
-      {
-        using ( FileStream file = new FileStream( Filename, FileMode.Open, FileAccess.Read ) )
+        Stop();
+        try
         {
-          var tempTune = new SidTune( file );
-
-          if ( !tempTune.StatusOk )
-          {
+            using var file = new FileStream(filename, FileMode.Open, FileAccess.Read);
+            return LoadSidFromStream(file);
+        }
+        catch (Exception)
+        {
             return false;
-          }
-          Info = tempTune.info;
-          return true;
         }
-      }
-      catch ( Exception )
-      {
-        return false;
-      }
     }
-
-
-
-    public bool LoadSIDInfoFromStream( Stream IOIn, out SidTuneInfo Info )
+    
+    public bool LoadSidFromStream(Stream stream)
     {
-      Info = null;
-      try
-      {
-        using ( IOIn )
-        {
-          var tempTune = new SidTune( IOIn );
+        Stop();
 
-          if ( !tempTune.StatusOk )
-          {
+        if (stream == null)
+        {
             return false;
-          }
-          Info = tempTune.info;
-          return true;
         }
-      }
-      catch ( Exception )
-      {
-        return false;
-      }
+
+        _currentTune = new SidTune(stream);
+
+        return _currentTune.StatusOk;
     }
-
-
-
-    public bool LoadSIDFromFile( string Filename )
+    
+    public bool LoadSidInfoFromFile(string filename, out SidTuneInfo info)
     {
-      Stop();
-      try
-      {
-        using ( FileStream file = new FileStream( Filename, FileMode.Open, FileAccess.Read ) )
+        info = null;
+        
+        try
         {
-          return LoadSIDFromStream( file );
+            using var file = new FileStream(filename, FileMode.Open, FileAccess.Read);
+            
+            var tempTune = new SidTune(file);
+            if (!tempTune.StatusOk)
+            {
+                return false;
+            }
+            
+            info = tempTune.info;
+            
+            return true;
         }
-      }
-      catch ( Exception )
-      {
-        return false;
-      }
+        catch (Exception)
+        {
+            return false;
+        }
     }
-
-
-
-    public bool LoadSIDFromStream( Stream mem )
+    
+    public bool LoadSidInfoFromStream(Stream ioIn, out SidTuneInfo info)
     {
-      Stop();
-
-      if ( mem == null )
-      {
-        return false;
-      }
-
-      _CurrentTune = new SidTune( mem );
-
-      return _CurrentTune.StatusOk;
+        info = null;
+        
+        try
+        {
+            using (ioIn)
+            {
+                var tempTune = new SidTune(ioIn);
+                if (!tempTune.StatusOk)
+                {
+                    return false;
+                }
+                
+                info = tempTune.info;
+                
+                return true;
+            }
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
-
-
-
+    
     /// <summary>
     /// returns the current Status of the Player
     /// </summary>
     public State State
     {
-      get
-      {
-        if ( _InternalPlayer != null )
+        get
         {
-          switch ( _InternalPlayer.State )
-          {
-            case SID2Types.sid2_player_t.sid2_paused:
-              return State.PAUSED;
-            case SID2Types.sid2_player_t.sid2_playing:
-              return State.PLAYING;
-            case SID2Types.sid2_player_t.sid2_stopped:
-            default:
-              return State.STOPPED;
-          }
+            if (_internalPlayer == null)
+                return State.Stopped;
+            
+            switch (_internalPlayer.State)
+            {
+                case SID2Types.sid2_player_t.sid2_paused:
+                    return State.Paused;
+                case SID2Types.sid2_player_t.sid2_playing:
+                    return State.Playing;
+                case SID2Types.sid2_player_t.sid2_stopped:
+                default:
+                    return State.Stopped;
+            }
         }
-        return State.STOPPED;
-      }
     }
 
-
-
-    public SidTuneInfo TuneInfo
-    {
-      get
-      {
-        if ( _CurrentTune != null )
-        {
-          return _CurrentTune.Info;
-        }
-        return new SidTuneInfo();
-      }
-    }
-
+    public SidTuneInfo TuneInfo => _currentTune != null ? _currentTune.Info : new SidTuneInfo();
 
 
     /// <summary>
     ///  Start playing the tune with the default song
     /// </summary>
-    /// <param name="tune">SidTune</param>
     public void Start()
     {
-      if ( State == State.PLAYING )
-      {
-        return;
-      }
-      Start( 0 );
+        if (State == State.Playing)
+        {
+            return;
+        }
+        
+        Start(0);
     }
 
 
@@ -248,74 +225,72 @@ namespace SharpSid
     /// <summary>
     /// Start playing the tune with the selected song
     /// </summary>
-    /// <param name="SongNumber">song id (1..count), 0 = default song</param>
-    public void Start( int SongNumber )
+    /// <param name="songNumber">song id (1..count), 0 = default song</param>
+    public void Start(int songNumber)
     {
-      if ( Stopping )
-      {
-        return;
-      }
-      if ( _CurrentTune == null )
-      {
-        return;
-      }
+        if (Stopping)
+        {
+            return;
+        }
+        
+        if (_currentTune == null)
+        {
+            return;
+        }
 
-      _WavePlayer = new WaveOut();
+        _internalPlayer = new InternalPlayer();
 
-      WaveFormat    fmt                     = new WaveFormat( _Frequency, 16, 2 );
-      _BufferedWaveProvider                 = new BufferedWaveProvider( fmt );
-      _BufferedWaveProvider.BufferDuration  = TimeSpan.FromSeconds( 2 ); // allow us to get well ahead of ourselves
+        var config = _internalPlayer.config();
+        config.frequency      = FREQUENCY;
+        config.playback       = SID2Types.sid2_playback_t.sid2_mono;
+        config.optimisation   = SID2Types.SID2_DEFAULT_OPTIMISATION;
+        config.sidModel       = (SID2Types.sid2_model_t)_currentTune.Info.sidModel;
+        config.clockDefault   = SID2Types.sid2_clock_t.SID2_CLOCK_CORRECT;
+        config.clockSpeed     = SID2Types.sid2_clock_t.SID2_CLOCK_CORRECT;
+        config.clockForced    = false;
+        config.environment    = SID2Types.sid2_env_t.sid2_envR;
+        config.forceDualSids  = false;
+        config.volume         = 255;
+        config.sampleFormat   = SID2Types.sid2_sample_t.SID2_LITTLE_SIGNED;
+        config.sidDefault     = SID2Types.sid2_model_t.SID2_MODEL_CORRECT;
+        config.sidSamples     = true;
+        config.precision      = SID2Types.SID2_DEFAULT_PRECISION;
+        _internalPlayer.config(config);
 
-      _WavePlayer.Init( _BufferedWaveProvider );
+        _currentTune.selectSong(songNumber);
+        _internalPlayer.load(_currentTune);
 
-      _InternalPlayer = new InternalPlayer();
+        _isStereo = _currentTune.isStereo;
 
-      sid2_config_t config = _InternalPlayer.config();
+        _internalPlayer.start();
 
-      config.frequency      = _Frequency;
-      config.playback       = SID2Types.sid2_playback_t.sid2_mono;
-      config.optimisation   = SID2Types.SID2_DEFAULT_OPTIMISATION;
-      config.sidModel       = (SID2Types.sid2_model_t)_CurrentTune.Info.sidModel;
-      config.clockDefault   = SID2Types.sid2_clock_t.SID2_CLOCK_CORRECT;
-      config.clockSpeed     = SID2Types.sid2_clock_t.SID2_CLOCK_CORRECT;
-      config.clockForced    = false;
-      config.environment    = SID2Types.sid2_env_t.sid2_envR;
-      config.forceDualSids  = false;
-      config.volume         = 255;
-      config.sampleFormat   = SID2Types.sid2_sample_t.SID2_LITTLE_SIGNED;
-      config.sidDefault     = SID2Types.sid2_model_t.SID2_MODEL_CORRECT;
-      config.sidSamples     = true;
-      config.precision      = SID2Types.SID2_DEFAULT_PRECISION;
-
-      _InternalPlayer.config( config );
-
-      _CurrentTune.selectSong( SongNumber );
-      _InternalPlayer.load( _CurrentTune );
-
-      _IsStereo = _CurrentTune.isStereo;
-
-      _InternalPlayer.start();
-
-      _Thread = new Thread( new ThreadStart( ThreadProc ) );
-      _Thread.Start();
+        _thread = new Thread(ThreadProc);
+        _thread.Start();
     }
 
 
 
     private void ThreadProc()
     {
-      _WavePlayer.Play();
-      while ( !_Aborting )
-      {
-        Thread.Sleep( 20 );
-
-        if ( ( _BufferedWaveProvider != null )
-        &&   ( _BufferedWaveProvider.BufferLength - _BufferedWaveProvider.BufferedBytes >= _BufferedWaveProvider.WaveFormat.AverageBytesPerSecond / 4 ) )
+        var started = false;
+        
+        while (!_aborting)
         {
-          Filler();
+            Thread.Sleep(20);
+
+            if (_stream.GetBufferedByteCount() < PLAY_BUFFER_SIZE)
+            {
+                Filler();
+            }
+
+            if (!started && _stream.GetBufferedByteCount() >= 1_024)
+            {
+                _soundPlayer.Play();
+                started = true;
+            }
         }
-      }
-      _Thread = null;
+
+        _thread = null;
     }
 
 
@@ -325,77 +300,71 @@ namespace SharpSid
     /// </summary>
     public void Stop()
     {
-      if ( _CurrentTune == null )
-      {
-        return;
-      }
-
-      if ( Stopping )
-      {
-        return;
-      }
-
-      lock ( _LockObj )
-      {
-        _Aborting = true;
-
-        if ( _WavePlayer != null )
+        if (_currentTune == null)
         {
-          _WavePlayer.Stop();
-          _WavePlayer.Dispose();
-          _WavePlayer = null;
+            return;
         }
 
-        while ( _Thread != null )
+        if (Stopping)
         {
-          Thread.Sleep( 10 );
+            return;
         }
-        if ( _InternalPlayer != null )
+
+        lock (_lockObj)
         {
-          _InternalPlayer.stop();
+            _aborting = true;
+
+            // if ( _WavePlayer != null )
+            // {
+            //     _WavePlayer.Stop();
+            //     _WavePlayer.Dispose();
+            //     _WavePlayer = null;
+            // }
+
+            while (_thread != null)
+            {
+                Thread.Sleep( 10 );
+            }
+
+            _internalPlayer?.stop();
+
+            _aborting = false;
         }
-        _Aborting = false;
-      }
     }
-
-
-
+    
     /// <summary>
     /// pause playing
     /// </summary>
     public void Pause()
     {
-      if ( Stopping )
-      {
-        return;
-      }
-
-      if ( ( _InternalPlayer != null )
-      &&   ( _InternalPlayer.State == SID2Types.sid2_player_t.sid2_playing ) )
-      {
-        _WavePlayer.Pause();
-        _InternalPlayer.pause();
-        while ( _InternalPlayer.inPlay )
+        if (Stopping)
         {
-          Thread.Sleep( 1 );
+            return;
         }
-      }
+
+        if (_internalPlayer != null &&  _internalPlayer.State == SID2Types.sid2_player_t.sid2_playing)
+        {
+            _soundPlayer.Pause();
+            _internalPlayer.pause();
+            while (_internalPlayer.inPlay)
+            {
+                Thread.Sleep(1);
+            }
+        }
     }
-
-
 
     /// <summary>
     /// resume playing
     /// </summary>
     public void Resume()
     {
-      if ( Stopping )
-      {
-        return;
-      }
+        if (Stopping)
+        {
+            return;
+        }
 
-      _WavePlayer.Play();
-      _InternalPlayer.resume();
+        _soundPlayer.Play();
+        _internalPlayer.resume();
     }
 
 
@@ -403,57 +372,42 @@ namespace SharpSid
     /// <summary>
     /// is Player currently stopping?
     /// </summary>
-    public bool Stopping
-    {
-      get
-      {
-        return ( ( _Aborting )
-        &&       ( !_Aborted ) );
-      }
-    }
-
+    public bool Stopping => _aborting &&  !_aborted;
 
 
     public void Dispose()
     {
-      Stop();
+        Stop();
 
-      if ( _PlayBuffer != IntPtr.Zero )
-      {
-        Marshal.FreeHGlobal( _PlayBuffer );
-        _PlayBuffer = IntPtr.Zero;
-      }
-      _InternalPlayer = null;
+        _internalPlayer = null;
+    }
+    
+    private static byte[] StringToByteArrayFastest(string hex)
+    {
+        if (hex.Length % 2 == 1)
+            throw new Exception( "The binary key cannot have an odd number of digits" );
+
+        var arr = new byte[hex.Length >> 1];
+
+        for (var i = 0; i < hex.Length >> 1; ++i)
+        {
+            arr[i] = (byte)((GetHexVal(hex[i << 1]) << 4) + GetHexVal(hex[(i << 1)+1]));
+        }
+
+        return arr;
     }
 
 
 
-    private static byte[] StringToByteArrayFastest( string hex )
+    private static int GetHexVal(char hex)
     {
-      if ( hex.Length % 2 == 1 )
-        throw new Exception( "The binary key cannot have an odd number of digits" );
-
-      byte[] arr = new byte[hex.Length >> 1];
-
-      for ( int i = 0; i < hex.Length >> 1; ++i )
-      {
-        arr[i] = (byte)( ( GetHexVal( hex[i << 1] ) << 4 ) + ( GetHexVal( hex[( i << 1 ) + 1] ) ) );
-      }
-
-      return arr;
-    }
-
-
-
-    private static int GetHexVal( char hex )
-    {
-      int val = (int)hex;
-      //For uppercase A-F letters:
-      //return val - (val < 58 ? 48 : 55);
-      //For lowercase a-f letters:
-      //return val - (val < 58 ? 48 : 87);
-      //Or the two combined, but a bit slower:
-      return val - ( val < 58 ? 48 : ( val < 97 ? 55 : 87 ) );
+        var val = (int)hex;
+        //For uppercase A-F letters:
+        //return val - (val < 58 ? 48 : 55);
+        //For lowercase a-f letters:
+        //return val - (val < 58 ? 48 : 87);
+        //Or the two combined, but a bit slower:
+        return val - (val < 58 ? 48 : val < 97 ? 55 : 87);
     }
 
 
@@ -461,92 +415,82 @@ namespace SharpSid
     /// <summary>
     /// Inject regular program and set start address
     /// </summary>
-    /// <param name="HexData"></param>
-    /// <param name="DataStartAddress"></param>
-    /// <param name="InitialAddress"></param>
+    /// <param name="hexData"></param>
+    /// <param name="dataStartAddress"></param>
+    /// <param name="initialAddress"></param>
     /// <returns></returns>
-    public bool PlayFromBinary( string HexData, int DataStartAddress, int InitialAddress )
+    public bool PlayFromBinary(string hexData, int dataStartAddress, int initialAddress)
     {
-      Stop();
+        Stop();
 
-      var  byteData = StringToByteArrayFastest( HexData );
+        var byteData = StringToByteArrayFastest(hexData);
 
-      _CurrentTune = new SidTune();
+        _currentTune = new SidTune
+        {
+            info =
+            {
+                loadAddr = dataStartAddress,
+                initAddr = initialAddress,
+                playAddr = initialAddress,
+                c64dataLen = byteData.Length,
+                compatibility = SidTune.SIDTUNE_COMPATIBILITY_R64
+            }
+        };
 
-      _CurrentTune.info.loadAddr = DataStartAddress;
-      _CurrentTune.info.c64dataLen = byteData.Length;
-      _CurrentTune.info.initAddr = InitialAddress;
-      _CurrentTune.info.playAddr = InitialAddress;
-      _CurrentTune.info.compatibility = SidTune.SIDTUNE_COMPATIBILITY_R64;
-      _CurrentTune.InjectProgramInMemory( byteData, DataStartAddress );
-      _CurrentTune.status = true;
+        _currentTune.InjectProgramInMemory(byteData, dataStartAddress);
+        _currentTune.status = true;
 
-      _WavePlayer = new WaveOut();
+        _internalPlayer = new InternalPlayer();
 
-      WaveFormat    fmt                     = new WaveFormat( _Frequency, 16, 2 );
-      _BufferedWaveProvider = new BufferedWaveProvider( fmt );
-      _BufferedWaveProvider.BufferDuration = TimeSpan.FromSeconds( 2 ); // allow us to get well ahead of ourselves
+        var config = _internalPlayer.config();
+        config.frequency = FREQUENCY;
+        config.playback = SID2Types.sid2_playback_t.sid2_mono;
+        config.optimisation = SID2Types.SID2_DEFAULT_OPTIMISATION;
+        config.sidModel = (SID2Types.sid2_model_t)_currentTune.Info.sidModel;
+        config.clockDefault = SID2Types.sid2_clock_t.SID2_CLOCK_CORRECT;
+        config.clockSpeed = SID2Types.sid2_clock_t.SID2_CLOCK_CORRECT;
+        config.clockForced = false;
+        config.environment = SID2Types.sid2_env_t.sid2_envR;
+        config.forceDualSids = false;
+        config.volume = 255;
+        config.sampleFormat = SID2Types.sid2_sample_t.SID2_LITTLE_SIGNED;
+        config.sidDefault = SID2Types.sid2_model_t.SID2_MODEL_CORRECT;
+        config.sidSamples = true;
+        config.precision = SID2Types.SID2_DEFAULT_PRECISION;
+        config.environment = SID2Types.sid2_env_t.sid2_envR;
 
-      _WavePlayer.Init( _BufferedWaveProvider );
+        _internalPlayer.load(_currentTune);
+        _internalPlayer.config(config);
 
-      _InternalPlayer = new InternalPlayer();
+        // inject code
+        for (var i = 0; i < byteData.Length; ++i)
+        {
+            _internalPlayer.mem_writeMemByte(dataStartAddress + i, byteData[i]);
+        }
 
-      sid2_config_t config = _InternalPlayer.config();
+        _internalPlayer.SetCPUPos(initialAddress);
+        _isStereo = _currentTune.isStereo;
 
-      config.frequency = _Frequency;
-      config.playback = SID2Types.sid2_playback_t.sid2_mono;
-      config.optimisation = SID2Types.SID2_DEFAULT_OPTIMISATION;
-      config.sidModel = (SID2Types.sid2_model_t)_CurrentTune.Info.sidModel;
-      config.clockDefault = SID2Types.sid2_clock_t.SID2_CLOCK_CORRECT;
-      config.clockSpeed = SID2Types.sid2_clock_t.SID2_CLOCK_CORRECT;
-      config.clockForced = false;
-      config.environment = SID2Types.sid2_env_t.sid2_envR;
-      config.forceDualSids = false;
-      config.volume = 255;
-      config.sampleFormat = SID2Types.sid2_sample_t.SID2_LITTLE_SIGNED;
-      config.sidDefault = SID2Types.sid2_model_t.SID2_MODEL_CORRECT;
-      config.sidSamples = true;
-      config.precision = SID2Types.SID2_DEFAULT_PRECISION;
-      config.environment = SID2Types.sid2_env_t.sid2_envR;
+        _internalPlayer.start();
 
-      _InternalPlayer.load( _CurrentTune );
-      _InternalPlayer.config( config );
+        _thread = new Thread(ThreadProc);
+        _thread.Start();
 
-      // inject code
-      for ( int i = 0; i < byteData.Length; ++i )
-      {
-        _InternalPlayer.mem_writeMemByte( DataStartAddress + i, byteData[i] );
-      }
-
-      _InternalPlayer.SetCPUPos( InitialAddress );
-      _IsStereo = _CurrentTune.isStereo;
-
-      _InternalPlayer.start();
-
-      _Thread = new Thread( new ThreadStart( ThreadProc ) );
-      _Thread.Start();
-
-      return true;
+        return true;
     }
-
-
-
-    public void SetVolume( int Volume )
+    
+    public void SetVolume(int volume)
     {
-      if ( Volume < 0 )
-      {
-        Volume = 0;
-      }
-      if ( Volume > 100 )
-      {
-        Volume = 100;
-      }
-      if ( _WavePlayer != null )
-      {
-        _WavePlayer.Volume = Volume * 0.01f;
-      }
+        volume = volume switch
+        {
+            < 0 => 0,
+            > 100 => 100,
+            _ => volume
+        };
+
+        if (_soundPlayer != null)
+        {
+            _soundPlayer.Volume = volume * 0.01f;
+        }
     }
-
-
-  }
 }

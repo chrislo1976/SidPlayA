@@ -1,19 +1,8 @@
-using NAudio.Wave;
-using System;
-using System.Diagnostics;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Threading;
+namespace SharpSid;
 
-
-
-namespace SharpSid
-{
-  public enum State
-  {
-    STOPPED,
-    PAUSED,
-    PLAYING
-  }
-
+public enum State
+{ 
+    Stopped,
+    Paused,
+    Playing
 }

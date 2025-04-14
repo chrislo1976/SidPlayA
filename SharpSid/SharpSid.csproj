@@ -22,6 +22,6 @@
     <Content Include="gpl-2.0.txt" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="NAudio" Version="1.10.0" />
+    <PackageReference Include="SoundFlow" Version="1.0.3" />
   </ItemGroup>
 </Project>

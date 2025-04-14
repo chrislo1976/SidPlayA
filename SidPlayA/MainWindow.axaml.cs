@@ -1,6 +1,5 @@
-using System;
-using System.IO;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using SharpSid;
 
@@ -8,63 +7,65 @@ namespace SidPlayA;
 
 public partial class MainWindow : Window
 {
-    private readonly Player _player = new();
+    private readonly Player _sidPlayer = new();
     
     public MainWindow()
     {
         InitializeComponent();
-        
-        //const string fileName = "/Users/christian/Music/C64music/MUSICIANS/H/Hubbard_Rob/Lightforce.sid";
-        const string fileName = "/Users/christian/Music/C64music/MUSICIANS/G/Galway_Martin/Rambo_First_Blood_Part_II.sid";
-        //const string fileName = "/Users/christian/Music/C64music/MUSICIANS/L/Lieblich_Russell/Ghostbusters.sid";
-
-        _player.LoadSIDFromFile(fileName);
     }
     
     private void OnPlayClicked(object? sender, RoutedEventArgs e)
     {
-        if (_player.State != State.PLAYING )
+        if (_sidPlayer.TuneInfo.songs == 0)
         {
-            _player.Start();
+            _sidPlayer.PlayFromBinary(Songs.SONG_1, 2061, 2061);
         }
+
+        if (_sidPlayer.State == State.Playing)
+            return;
+        
+        _sidPlayer.Start();
     }
     
     private void OnPauseClicked(object? sender, RoutedEventArgs e)
     {
-        if (_player.State != State.PAUSED)
-        {
-            _player.Pause();
-        }
+        if (_sidPlayer.State == State.Paused)
+            return;
+        
+        _sidPlayer.Pause();
     }
     
     private void OnResumeClicked(object? sender, RoutedEventArgs e)
     {
-        if (_player.State == State.PAUSED)
-        {
-            _player.Resume();
-        }
+        if (_sidPlayer.State != State.Paused)
+            return;
+        
+        _sidPlayer.Resume();
     }
 
     private void OnStopClicked(object? sender, RoutedEventArgs e)
     {
-        _player.Stop();
+        if (_sidPlayer.State == State.Stopped)
+            return;
+            
+        _sidPlayer.Stop();
     }
     
     private void OnPreviousClicked(object? sender, RoutedEventArgs e)
     {
-        if (_player.TuneInfo.currentSong > 1)
+        if (_sidPlayer.TuneInfo.currentSong > 1)
         {
-            switch(_player.State)
+            switch(_sidPlayer.State)
             {
-                case State.PLAYING:
-                case State.PAUSED:
-                    _player.Stop();
+                case State.Playing:
+                case State.Paused:
+                    _sidPlayer.Stop();
                     break;
             }
 
 //            sp_songInfo.DataContext = null;
 
-            _player.Start( _player.TuneInfo.currentSong - 1 );
+            _sidPlayer.Start( _sidPlayer.TuneInfo.currentSong - 1 );
 
 //            sp_songInfo.DataContext = _player.TuneInfo;
 
@@ -73,21 +74,26 @@ public partial class MainWindow : Window
 
     private void OnNextClicked(object? sender, RoutedEventArgs e)
     {
-        if (_player.TuneInfo.currentSong < _player.TuneInfo.songs)
+        if (_sidPlayer.TuneInfo.currentSong < _sidPlayer.TuneInfo.songs)
         {
-            switch ( _player.State )
+            switch ( _sidPlayer.State )
             {
-                case State.PLAYING:
-                case State.PAUSED:
-                    _player.Stop();
+                case State.Playing:
+                case State.Paused:
+                    _sidPlayer.Stop();
                     break;
             }
 
 //            sp_songInfo.DataContext = null;
 
-            _player.Start( _player.TuneInfo.currentSong + 1 );
+            _sidPlayer.Start( _sidPlayer.TuneInfo.currentSong + 1 );
 
 //            sp_songInfo.DataContext = _player.TuneInfo;
         }
+    }
+
+    private void RangeBase_OnValueChanged(object? sender, RangeBaseValueChangedEventArgs e)
+    {
+        _sidPlayer.SetVolume((int)e.NewValue);
     }
 }
