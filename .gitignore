@@ -340,3 +340,4 @@ ASALocalRun/
 healthchecksdb
 /SharpSid/createpackage.bat
 /SharpSidPlayerForms/testfiles
+.DS_Store

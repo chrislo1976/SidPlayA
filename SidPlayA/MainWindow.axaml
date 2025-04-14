@@ -1,0 +1,16 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        x:Class="SidPlayA.MainWindow"
+        Title="SidPlayA">
+    <StackPanel Orientation="Horizontal">
+        <Button Click="OnPlayClicked">Play</Button>
+        <Button Click="OnPauseClicked">Pause</Button>
+        <Button Click="OnResumeClicked">Resume</Button>
+        <Button Click="OnStopClicked">Stop</Button>
+        <Button Click="OnPreviousClicked">Previous</Button>
+        <Button Click="OnNextClicked">Next</Button>
+    </StackPanel>
+</Window>
