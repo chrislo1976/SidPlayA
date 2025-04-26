@@ -4,15 +4,42 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
         x:Class="SidPlayA.MainWindow"
-        Title="SidPlayA">
-    <StackPanel Orientation="Horizontal">
-        <Button Click="OnPlayClicked">Play</Button>
-        <Button Click="OnPauseClicked">Pause</Button>
-        <Button Click="OnResumeClicked">Resume</Button>
-        <Button Click="OnStopClicked">Stop</Button>
-        <Button Click="OnPreviousClicked">Previous</Button>
-        <Button Click="OnNextClicked">Next</Button>
-        <Slider Minimum="0" Maximum="100" Value="75" Orientation="Horizontal" VerticalAlignment="Center" Width="100"
-                ValueChanged="RangeBase_OnValueChanged"/>
-    </StackPanel>
+        Title="SidPlayA"
+        Background="#6C5EB5"
+        Foreground="#352879">
+    
+    <Grid RowDefinitions="*,*,4*">
+        <Image Grid.Row="0" MaxWidth="1024" Source="avares://SidPlayA/Assets/images/app-logo.png"/>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center">
+            
+            <Button Width="100" Click="OnLoadClicked" Background="Transparent">
+                <Image Source="avares://SidPlayA/Assets/images/eject.png" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="None"/>
+            </Button>
+            
+            <Button Width="100" Click="OnPlayClicked" Background="Transparent">
+                <Image Source="avares://SidPlayA/Assets/images/play.png" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="None"/>
+            </Button>
+            
+            <Button Width="100" Click="OnPauseClicked" Background="Transparent">
+                <Image Source="avares://SidPlayA/Assets/images/pause.png" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="None"/>
+            </Button>
+            
+            <Button Width="100" Click="OnStopClicked" Background="Transparent">
+                <Image Source="avares://SidPlayA/Assets/images/stop.png" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="None"/>
+            </Button>
+            
+            <Button Width="100" Click="OnPreviousClicked" Background="Transparent">
+                <Image Source="avares://SidPlayA/Assets/images/previous.png" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="None"/>
+            </Button>
+            
+            <Button Width="100" Click="OnNextClicked" Background="Transparent">
+                <Image Source="avares://SidPlayA/Assets/images/next.png" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="None"/>
+            </Button>
+            
+            <Slider Minimum="0" Maximum="100" Value="75" Orientation="Horizontal" VerticalAlignment="Center" Width="100"
+                    ValueChanged="RangeBase_OnValueChanged"/>
+        </StackPanel>
+    </Grid>
+    
+    
 </Window>

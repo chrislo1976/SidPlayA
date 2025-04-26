@@ -1,6 +1,9 @@
+using System.IO;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using SharpSid;
 
 namespace SidPlayA;
@@ -14,12 +17,25 @@ public partial class MainWindow : Window
         InitializeComponent();
     }
     
+    private async void OnLoadClicked(object? sender, RoutedEventArgs e)
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Open sid file",
+            AllowMultiple = false
+        });
+
+        if (files.Count >= 1)
+        {
+            _sidPlayer.LoadSidFromFile(files[0].Path.AbsolutePath);
+        }
+    }
+
+    
     private void OnPlayClicked(object? sender, RoutedEventArgs e)
     {
         if (_sidPlayer.TuneInfo.songs == 0)
-        {
-            _sidPlayer.PlayFromBinary(Songs.SONG_1, 2061, 2061);
-        }
+            return;
 
         if (_sidPlayer.State == State.Playing)
             return;
@@ -53,43 +69,38 @@ public partial class MainWindow : Window
     
     private void OnPreviousClicked(object? sender, RoutedEventArgs e)
     {
-        if (_sidPlayer.TuneInfo.currentSong > 1)
+        if (_sidPlayer.TuneInfo.currentSong <= 1)
+            return;
+        
+        switch(_sidPlayer.State)
         {
-            switch(_sidPlayer.State)
-            {
-                case State.Playing:
-                case State.Paused:
-                    _sidPlayer.Stop();
-                    break;
-            }
+            case State.Playing:
+            case State.Paused:
+                _sidPlayer.Stop();
+                break;
+        }
 
 //            sp_songInfo.DataContext = null;
-
-            _sidPlayer.Start( _sidPlayer.TuneInfo.currentSong - 1 );
-
+        _sidPlayer.Start( _sidPlayer.TuneInfo.currentSong - 1 );
 //            sp_songInfo.DataContext = _player.TuneInfo;
-
-        }
     }
 
     private void OnNextClicked(object? sender, RoutedEventArgs e)
     {
-        if (_sidPlayer.TuneInfo.currentSong < _sidPlayer.TuneInfo.songs)
+        if (_sidPlayer.TuneInfo.currentSong >= _sidPlayer.TuneInfo.songs)
+            return;
+        
+        switch ( _sidPlayer.State )
         {
-            switch ( _sidPlayer.State )
-            {
-                case State.Playing:
-                case State.Paused:
-                    _sidPlayer.Stop();
-                    break;
-            }
+            case State.Playing:
+            case State.Paused:
+                _sidPlayer.Stop();
+                break;
+        }
 
 //            sp_songInfo.DataContext = null;
-
-            _sidPlayer.Start( _sidPlayer.TuneInfo.currentSong + 1 );
-
+        _sidPlayer.Start( _sidPlayer.TuneInfo.currentSong + 1 );
 //            sp_songInfo.DataContext = _player.TuneInfo;
-        }
     }
 
     private void RangeBase_OnValueChanged(object? sender, RangeBaseValueChangedEventArgs e)

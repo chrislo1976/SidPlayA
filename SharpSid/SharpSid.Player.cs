@@ -58,9 +58,14 @@ public class Player : IDisposable
         _byteBuffer = new byte[BYTE_BUFFER_SIZE];
       
         _audioEngine = new MiniAudioEngine(FREQUENCY, Capability.Playback);
+        //_soundPlayer = new SoundPlayer(new StreamDataProvider(File.OpenRead("/Users/christian/Music/journey.wav")));
         _soundPlayer = new SoundPlayer(new RawDataProvider(_stream, SampleFormat.S16, 2, FREQUENCY));
+        
+        Console.Write(_soundPlayer.Pan);
 
         Mixer.Master.AddComponent(_soundPlayer);
+        Mixer.Master.Volume = 0.5f;
+        _soundPlayer.Pan = 0.5f;
     }
     
     private void Filler()

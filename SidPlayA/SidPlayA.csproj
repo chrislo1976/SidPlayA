@@ -23,4 +23,14 @@
     <ItemGroup>
       <ProjectReference Include="..\SharpSid\SharpSid.csproj" />
     </ItemGroup>
+
+    <ItemGroup>
+        <AvaloniaResource Include="Assets/images/app-logo.png" />
+        <AvaloniaResource Include="Assets/images/eject.png" />
+        <AvaloniaResource Include="Assets/images/previous.png" />
+        <AvaloniaResource Include="Assets/images/pause.png" />
+        <AvaloniaResource Include="Assets/images/play.png" />
+        <AvaloniaResource Include="Assets/images/next.png" />
+        <AvaloniaResource Include="Assets/images/stop.png" />
+    </ItemGroup>
 </Project>
