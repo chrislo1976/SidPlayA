@@ -1,10 +1,13 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading;
+using SoundFlow.Abstracts.Devices;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Components;
 using SoundFlow.Enums;
 using SoundFlow.Providers;
+using SoundFlow.Structs;
 
 namespace SharpSid;
 
@@ -28,7 +31,9 @@ public class Player : IDisposable
     private readonly CircularBufferStream _stream = new(PLAY_BUFFER_SIZE * 4);
 
     // ReSharper disable once NotAccessedField.Local
-    private MiniAudioEngine _audioEngine;
+    private readonly MiniAudioEngine _audioEngine = new();
+    private static readonly AudioFormat Format = AudioFormat.Cd;
+    private AudioPlaybackDevice playbackDevice;
     
     private SoundPlayer _soundPlayer;
 
@@ -56,16 +61,15 @@ public class Player : IDisposable
     {
         _shortBuffer = new short[SHORT_BUFFER_SIZE];
         _byteBuffer = new byte[BYTE_BUFFER_SIZE];
-      
-        _audioEngine = new MiniAudioEngine(FREQUENCY, Capability.Playback);
-        //_soundPlayer = new SoundPlayer(new StreamDataProvider(File.OpenRead("/Users/christian/Music/journey.wav")));
-        _soundPlayer = new SoundPlayer(new RawDataProvider(_stream, SampleFormat.S16, 2, FREQUENCY));
         
-        Console.Write(_soundPlayer.Pan);
+        _audioEngine.UpdateDevicesInfo();
+        var defaultDevice = _audioEngine.PlaybackDevices.FirstOrDefault(x => x.IsDefault);
+        playbackDevice = _audioEngine.InitializePlaybackDevice(defaultDevice, Format);
 
-        Mixer.Master.AddComponent(_soundPlayer);
-        Mixer.Master.Volume = 0.5f;
-        _soundPlayer.Pan = 0.5f;
+        _soundPlayer = new SoundPlayer(_audioEngine, Format, new RawDataProvider(_stream, SampleFormat.S16, 2, FREQUENCY));
+        
+        playbackDevice.MasterMixer.AddComponent(_soundPlayer);
+        playbackDevice.Start();
     }
     
     private void Filler()
